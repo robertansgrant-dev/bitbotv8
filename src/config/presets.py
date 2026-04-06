@@ -16,6 +16,7 @@ class StylePreset:
     sma_fast: int
     sma_slow: int
     sma_trend: int
+    ltf_timeframe: str
     htf_timeframe: str
     trailing_stop: bool
     max_hold_minutes: int
@@ -39,12 +40,13 @@ SCALPING = StylePreset(
     sma_fast=8,
     sma_slow=20,
     sma_trend=200,
+    ltf_timeframe="1m",
     htf_timeframe="5m",
     trailing_stop=False,
     max_hold_minutes=30,
     risk_per_trade_pct=0.5,
     atr_sl_multiplier=1.5,
-    volatility_floor=0.0005,  # lowered for 1m bars where BTC ATR/price is ~0.0007
+    volatility_floor=0.0005,
 )
 
 DAY_TRADING = StylePreset(
@@ -52,16 +54,17 @@ DAY_TRADING = StylePreset(
     position_size_pct=60.0,
     stop_loss_pct=1.5,
     risk_reward=2.5,
-    max_daily_trades=8,
-    sma_fast=20,
-    sma_slow=50,
+    max_daily_trades=5,
+    sma_fast=9,
+    sma_slow=21,
     sma_trend=200,
+    ltf_timeframe="15m",
     htf_timeframe="4h",
     trailing_stop=True,
-    max_hold_minutes=240,
+    max_hold_minutes=360,
     risk_per_trade_pct=1.0,
     atr_sl_multiplier=2.0,
-    volatility_floor=0.0010,  # 2 * 0.001 / 2.0
+    volatility_floor=0.0015,
 )
 
 SWING_TRADING = StylePreset(
@@ -73,12 +76,13 @@ SWING_TRADING = StylePreset(
     sma_fast=30,
     sma_slow=100,
     sma_trend=200,
+    ltf_timeframe="1h",
     htf_timeframe="1d",
     trailing_stop=True,
     max_hold_minutes=1440,
     risk_per_trade_pct=1.5,
     atr_sl_multiplier=3.0,
-    volatility_floor=0.0007,  # 2 * 0.001 / 3.0
+    volatility_floor=0.0007,
 )
 
 PRESETS: dict[str, StylePreset] = {

@@ -49,7 +49,7 @@ class RiskConfig:
     max_hold_extension_minutes: int = 15 # Extra hold when profit < fee buffer
     breakeven_threshold_r: float = 0.5   # Snap SL to BE when profit ≥ 0.5 × 1R
     min_profit_fee_buffer: float = 1.5   # Exit only if profit ≥ 1.5 × round-trip cost
-    adx_threshold: float = 20.0          # Minimum ADX to consider market trending
+    adx_threshold: float = 25.0          # Minimum ADX to consider market trending
     volume_sma_period: int = 20          # Look-back for volume SMA
     min_volatility_pct: float = 0.0025   # Minimum ATR/price ratio — matches signal_generator floor
 

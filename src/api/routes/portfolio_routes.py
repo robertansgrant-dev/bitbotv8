@@ -120,7 +120,7 @@ def open_manual():
     tp: float
     atr_val: float = 0.0
     try:
-        df = _to_df(client.get_klines(s.settings.symbol, "1m", 200))
+        df = _to_df(client.get_klines(s.settings.symbol, preset.ltf_timeframe, 200))
         sl, tp, atr_val = rm.calculate_dynamic_levels(df, price, body.side)
     except Exception as exc:
         logger.warning("ATR levels unavailable for manual order (%s) — using fixed %%", exc)

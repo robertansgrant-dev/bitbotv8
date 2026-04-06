@@ -394,7 +394,7 @@ class BotRunner:
         """Fetch and validate LTF + HTF klines. Returns (None, None) on failure."""
         state = self._state
         try:
-            df = _to_df(client.get_klines(state.settings.symbol, "1m", 500))
+            df = _to_df(client.get_klines(state.settings.symbol, preset.ltf_timeframe, 500))
             df_htf = _to_df(
                 client.get_klines(state.settings.symbol, preset.htf_timeframe, 500)
             )

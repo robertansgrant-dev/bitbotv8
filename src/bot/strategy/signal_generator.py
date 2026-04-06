@@ -16,7 +16,7 @@ Trend = Literal["UP", "DOWN", "NEUTRAL"]
 
 # Minimum ADX value required to take a PULLBACK signal.
 # Below this threshold the market is ranging and pullback entries underperform.
-_ADX_TREND_THRESHOLD = 20.0
+_ADX_TREND_THRESHOLD = 25.0
 
 # Volume must be at least this fraction of its rolling average for any signal.
 # Protects against entries in illiquid/thin conditions.
