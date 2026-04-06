@@ -61,15 +61,17 @@ Mode switching is **in-memory only** — never written to disk.
 ## Trading Style Presets
 | | Scalping | Day Trading | Swing Trading |
 |---|---|---|---|
+| LTF (entry) | 1m | 15m | 1h |
+| HTF (trend) | 5m | 4h | 1d |
 | Position size (fallback) | 20% | 60% | 90% |
 | Stop loss (fallback %) | 0.4% | 1.5% | 3.5% |
 | R:R | 2.0 | 2.5 | 4.0 |
-| Max trades/day | 100 | 8 | 3 |
-| SMA fast/slow/trend | 8/20/200 | 20/50/200 | 30/100/200 |
-| Max hold (minutes) | 30 | 240 | 1440 |
+| Max trades/day | 100 | 5 | 3 |
+| SMA fast/slow/trend | 8/20/200 | 9/21/200 | 30/100/200 |
+| Max hold (minutes) | 30 | 360 | 1440 |
 | risk_per_trade_pct | 0.5% | 1.0% | 1.5% |
 | atr_sl_multiplier | 1.5× | 2.0× | 3.0× |
-| volatility_floor | 0.0013 | 0.0010 | 0.0007 |
+| volatility_floor | 0.0005 | 0.0015 | 0.0007 |
 
 Position sizing and SL/TP are **ATR-based** when klines are available. Fixed-% values above are fallbacks only.
 
@@ -87,7 +89,7 @@ Class-based `RiskManager` configured via `RiskConfig` dataclass. One instance li
 **Methods used by bot_runner:**
 - `calculate_dynamic_levels(df, entry, side)` → `(sl, tp, atr_val)` — ATR-based, falls back to 1.5% fixed if ATR fails
 - `calculate_position_size(entry, sl)` → qty — risk-per-trade: sizes so SL hit = `risk_per_trade_pct` of equity
-- `is_tradable_regime(df)` → bool — requires ADX > 20 AND (volume OR volatility above thresholds); logs skip reason
+- `is_tradable_regime(df)` → bool — requires ADX > 25 AND (volume OR volatility above thresholds); logs skip reason
 - `apply_breakeven_logic(trade, price)` → Optional[float] — one-shot; activates at +0.5R; snaps SL to entry + fee/unit
 - `should_exit_by_time(trade, price, now)` → `(bool, reason)` — reasons: `"hold"`, `"extend_for_fees"`, `"time_exit"`
 - `calculate_trade_metrics(trade)` → dict — includes `gross_pnl`, `fees_paid`, `net_pnl`, `fee_drag_pct`, `mfe_pnl`, `exit_efficiency`
@@ -117,7 +119,7 @@ Class-based `RiskManager` configured via `RiskConfig` dataclass. One instance li
 2. **Volume gate** — last *completed* candle vol must be ≥ 70% of 20-bar SMA (`low_vol` skip). Uses `iloc[-2]` not `iloc[-1]` because the live candle is still forming and always reads low
 3. **Dead market floor** — `ATR(14)/price < preset.volatility_floor` → `dead_market` skip. Floor is per-preset (`2 × fee_rate / atr_sl_multiplier`): scalping=0.0013, day=0.0010, swing=0.0007. Overrides PULLBACK exemption
 4. **ATR regime** (`_is_market_trending`) — CROSSOVER/MOMENTUM/BREAKOUT suppressed when ATR < 70% of 30-bar mean (`chop` skip); PULLBACK still runs but is blocked by the dead_market check above
-5. **ADX gate on PULLBACK** — requires ADX ≥ 20 (`weak_trend` skip)
+5. **ADX gate on PULLBACK** — requires ADX ≥ 25 (`weak_trend` skip)
 6. **RM regime gate** (`rm.is_tradable_regime`) — called in `_seek_entry` before `get_signal`; also logs `weak_trend`/`low_vol`/`chop`
 
 ### Exit Logic
