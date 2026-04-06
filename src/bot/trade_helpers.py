@@ -42,6 +42,7 @@ def sync_rm_from_preset(rm: RiskManager, preset: StylePreset, settings: Settings
     rm.cfg.time_exit_minutes = preset.max_hold_minutes
     rm.cfg.max_hold_extension_minutes = 5 if preset.name == "scalping" else 15
     rm.cfg.fee_rate = settings.fee_rate
+    rm.cfg.min_volatility_pct = preset.volatility_floor
 
 
 def build_closed_trade_state(pos: Position, price: float, reason: str) -> TradeState:

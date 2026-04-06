@@ -225,14 +225,16 @@ class RiskManager:
             return False
 
         # Volume gate — must be ≥ 70% of rolling SMA (aligns with signal_generator floor)
+        # Uses last completed candle (iloc[-2]) — the live candle is still forming
+        # and always reads artificially low volume mid-bar.
         current_vol: float = 0.0
         vol_sma: float = 1.0
         has_volume: bool = True
         try:
             vol_sma = float(
-                ohlcv_df["volume"].rolling(self.cfg.volume_sma_period).mean().iloc[-1]
+                ohlcv_df["volume"].rolling(self.cfg.volume_sma_period).mean().iloc[-2]
             )
-            current_vol = float(ohlcv_df["volume"].iloc[-1])
+            current_vol = float(ohlcv_df["volume"].iloc[-2])
             has_volume = vol_sma > 0 and current_vol >= vol_sma * 0.70
         except Exception as exc:
             logger.warning("Volume calculation failed (%s) — assuming sufficient", exc)
