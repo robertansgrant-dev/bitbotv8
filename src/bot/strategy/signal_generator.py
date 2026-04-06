@@ -24,16 +24,20 @@ _VOLUME_RATIO_MIN = 0.70
 
 
 def get_htf_trend(df_htf: pd.DataFrame, preset: StylePreset) -> Trend:
-    """Determine higher-timeframe trend direction."""
+    """Determine higher-timeframe trend direction using price vs trend SMA.
+
+    Only price vs the trend SMA is used — requiring the fast SMA to also clear
+    the trend SMA adds ~80 h of extra lag on the 4h timeframe, keeping the bot in
+    NEUTRAL for the entire duration of a sharp rally or sell-off.
+    """
     if len(df_htf) < preset.sma_trend:
         return "NEUTRAL"
     close = df_htf["close"]
     trend_val = sma(close, preset.sma_trend).iloc[-1]
-    fast_val = sma(close, preset.sma_fast).iloc[-1]
     price = close.iloc[-1]
-    if price > trend_val and fast_val > trend_val:
+    if price > trend_val:
         return "UP"
-    if price < trend_val and fast_val < trend_val:
+    if price < trend_val:
         return "DOWN"
     return "NEUTRAL"
 
@@ -55,17 +59,16 @@ def _is_market_trending(df: pd.DataFrame) -> bool:
     return current >= avg * 0.70
 
 
-_VOLATILITY_FLOOR = 0.0025  # ATR/price minimum — below this 1R < round-trip cost
+def _is_market_dead(df: pd.DataFrame, volatility_floor: float) -> bool:
+    """Return True when ATR/price is below the per-preset volatility floor.
 
-
-def _is_market_dead(df: pd.DataFrame) -> bool:
-    """Return True when ATR is below the 0.25 % volatility floor.
-
-    Rationale: with sl_atr_mult=1.5 the expected 1R move is ATR × 1.5.
-    Round-trip fee + slippage ≈ 0.12 % of notional.  When ATR/price < 0.0025
-    the 1R move (0.375 %) barely clears costs — any signal has negative EV before
-    win-rate is even considered.  Hard floor that overrides the PULLBACK exemption
-    from _is_market_trending() in genuine dead/grind markets.
+    Floor is derived per preset as 2 * fee_rate / atr_sl_multiplier so that
+    1R always covers round-trip costs regardless of timeframe:
+      scalping  (1m, mult=1.5) → 0.0013
+      day_trade (1h, mult=2.0) → 0.0010
+      swing     (1d, mult=3.0) → 0.0007
+    A single hardcoded 0.0025 floor permanently blocked scalping on 1m bars
+    where BTC's natural ATR/price is ~0.0008.
     """
     if len(df) < 15:
         return False  # insufficient history — allow through
@@ -74,7 +77,7 @@ def _is_market_dead(df: pd.DataFrame) -> bool:
     close = df["close"].iloc[-1]
     if pd.isna(current_atr) or close <= 0:
         return False
-    return (current_atr / close) < _VOLATILITY_FLOOR
+    return (current_atr / close) < volatility_floor
 
 
 def _has_sufficient_volume(df: pd.DataFrame, periods: int = 20) -> bool:
@@ -82,11 +85,13 @@ def _has_sufficient_volume(df: pd.DataFrame, periods: int = 20) -> bool:
 
     Prevents entries during illiquid windows (e.g. late-night thin market,
     exchange maintenance) where spreads are wide and slippage is elevated.
+    Uses the last *completed* candle (iloc[-2]) — the live candle (iloc[-1]) is
+    still forming and always shows artificially low volume mid-bar.
     """
-    if len(df) < periods + 1:
+    if len(df) < periods + 2:
         return True  # not enough history — allow through
-    current_vol = df["volume"].iloc[-1]
-    avg_vol = df["volume"].iloc[-periods - 1:-1].mean()
+    current_vol = df["volume"].iloc[-2]
+    avg_vol = df["volume"].iloc[-periods - 2:-2].mean()
     if avg_vol == 0 or pd.isna(avg_vol):
         return True
     return (current_vol / avg_vol) >= _VOLUME_RATIO_MIN
@@ -217,8 +222,8 @@ def get_signal(
 
     # Volume gate — applies to all signal types
     if not _has_sufficient_volume(df):
-        current_vol = df["volume"].iloc[-1] if len(df) > 0 else 0
-        avg_vol = df["volume"].iloc[-21:-1].mean() if len(df) > 21 else 0
+        current_vol = df["volume"].iloc[-2] if len(df) > 1 else 0
+        avg_vol = df["volume"].iloc[-22:-2].mean() if len(df) > 22 else 0
         logger.info(
             "Signal skip: low_vol (vol=%.0f < %.0f%% of SMA=%.0f)",
             current_vol, _VOLUME_RATIO_MIN * 100, avg_vol,
@@ -226,12 +231,12 @@ def get_signal(
         return "NONE", "NONE"
 
     # Hard volatility floor — overrides PULLBACK exemption in dead/grind markets
-    if _is_market_dead(df):
+    if _is_market_dead(df, preset.volatility_floor):
         close = df["close"].iloc[-1]
         current_atr = atr(df, 14).iloc[-1]
         logger.info(
             "Signal skip: dead_market (ATR/price=%.4f < floor=%.4f  ATR=%.2f)",
-            current_atr / close if close > 0 else 0, _VOLATILITY_FLOOR, current_atr,
+            current_atr / close if close > 0 else 0, preset.volatility_floor, current_atr,
         )
         return "NONE", "NONE"
 

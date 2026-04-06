@@ -24,6 +24,10 @@ class StylePreset:
     # ATR multiplier for stop loss distance (ATR * multiplier = SL offset in price)
     # When ATR data is available this overrides the fixed stop_loss_pct
     atr_sl_multiplier: float = 1.5
+    # Minimum ATR/price ratio for a signal to fire — below this 1R barely covers fees.
+    # Formula: 2 * fee_rate / atr_sl_multiplier (fee_rate=0.001, so each style differs).
+    # Scalping 1m bars have naturally small ATR; a shared 0.0025 floor would block all trades.
+    volatility_floor: float = 0.0013
 
 
 SCALPING = StylePreset(
@@ -40,6 +44,7 @@ SCALPING = StylePreset(
     max_hold_minutes=30,
     risk_per_trade_pct=0.5,
     atr_sl_multiplier=1.5,
+    volatility_floor=0.0013,  # 2 * 0.001 / 1.5
 )
 
 DAY_TRADING = StylePreset(
@@ -56,6 +61,7 @@ DAY_TRADING = StylePreset(
     max_hold_minutes=240,
     risk_per_trade_pct=1.0,
     atr_sl_multiplier=2.0,
+    volatility_floor=0.0010,  # 2 * 0.001 / 2.0
 )
 
 SWING_TRADING = StylePreset(
@@ -72,6 +78,7 @@ SWING_TRADING = StylePreset(
     max_hold_minutes=1440,
     risk_per_trade_pct=1.5,
     atr_sl_multiplier=3.0,
+    volatility_floor=0.0007,  # 2 * 0.001 / 3.0
 )
 
 PRESETS: dict[str, StylePreset] = {
