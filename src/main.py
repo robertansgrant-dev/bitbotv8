@@ -29,7 +29,7 @@ def main() -> None:
     runner = BotRunner(state)
     app = create_app(state, runner)
 
-    logger.info("Starting BitbotV7 — http://localhost:8000")
+    logger.info("Starting BitbotV8 — http://localhost:8000")
     logger.info("Mode: %s  Style: %s  Symbol: %s", state.mode, state.style, settings.symbol)
 
     app.run(

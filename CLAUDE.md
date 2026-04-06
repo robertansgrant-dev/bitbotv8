@@ -1,7 +1,7 @@
-# Claude Project Context — BitbotV7
+# Claude Project Context — BitbotV8
 
 ## Project Overview
-BitbotV7 is a Bitcoin trading bot with a Flask web UI and REST API.
+BitbotV8 is a Bitcoin trading bot with a Flask web UI and REST API.
 - Three trading styles: scalping, day trading, swing trading
 - Three modes: paper (simulated), testnet (Binance testnet), live
 - Web dashboard at **http://localhost:8000** (local) or **http://192.168.1.112:8000** (Raspberry Pi 3B)
@@ -11,7 +11,7 @@ The bot runs as a systemd service on a Raspberry Pi 3B (`BitBot`, `192.168.1.112
 - SSH: `ssh robbiegrant@192.168.1.112`
 - Service: `sudo systemctl restart bitbot.service`
 - Logs: `journalctl -u bitbot.service -f`
-- Project path on Pi: `~/BitbotV7`
+- Project path on Pi: `~/BitbotV8`
 
 Deploy changed files via paramiko SFTP, then restart the service. Password is in memory.
 

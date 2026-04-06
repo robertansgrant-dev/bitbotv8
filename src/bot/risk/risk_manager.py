@@ -219,7 +219,7 @@ class RiskManager:
         is_trending = adx_val > self.cfg.adx_threshold
         if not is_trending:
             logger.info(
-                "Regime skip: weak_trend (ADX=%.1f < threshold=%.1f)",
+                "Regime skip: weak_trend (ADX=%.1f <= threshold=%.1f)",
                 adx_val, self.cfg.adx_threshold,
             )
             return False
