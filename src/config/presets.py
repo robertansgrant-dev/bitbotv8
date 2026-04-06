@@ -44,7 +44,7 @@ SCALPING = StylePreset(
     max_hold_minutes=30,
     risk_per_trade_pct=0.5,
     atr_sl_multiplier=1.5,
-    volatility_floor=0.0013,  # 2 * 0.001 / 1.5
+    volatility_floor=0.0005,  # lowered for 1m bars where BTC ATR/price is ~0.0007
 )
 
 DAY_TRADING = StylePreset(
