@@ -69,6 +69,7 @@ Mode switching is **in-memory only** — never written to disk.
 | Max hold (minutes) | 30 | 240 | 1440 |
 | risk_per_trade_pct | 0.5% | 1.0% | 1.5% |
 | atr_sl_multiplier | 1.5× | 2.0× | 3.0× |
+| volatility_floor | 0.0013 | 0.0010 | 0.0007 |
 
 Position sizing and SL/TP are **ATR-based** when klines are available. Fixed-% values above are fallbacks only.
 
@@ -81,7 +82,7 @@ Class-based `RiskManager` configured via `RiskConfig` dataclass. One instance li
 - `time_exit_minutes` — synced from `preset.max_hold_minutes`
 - `max_hold_extension_minutes` — 5 min for scalping, 15 min for other styles
 - `fee_rate` — synced from `settings.fee_rate` (default 0.001 = 0.1% Binance spot)
-- `min_volatility_pct` — 0.0025 (matches `_VOLATILITY_FLOOR` in signal_generator)
+- `min_volatility_pct` — per-preset `volatility_floor` (scalping=0.0013, day=0.0010, swing=0.0007)
 
 **Methods used by bot_runner:**
 - `calculate_dynamic_levels(df, entry, side)` → `(sl, tp, atr_val)` — ATR-based, falls back to 1.5% fixed if ATR fails
@@ -93,7 +94,7 @@ Class-based `RiskManager` configured via `RiskConfig` dataclass. One instance li
 - `check_daily_circuit_breaker()` → bool — trips at `max_daily_loss_pct` of current equity (computed against current equity, not initial)
 - `record_trade_close(net_pnl)` — keeps RM equity in sync with portfolio
 - `reset_daily_stats()` — called at midnight UTC by `_check_daily_reset`; also called by `/api/bot/reset`
-- Volume threshold in `is_tradable_regime`: `current_vol >= vol_sma × 0.70` (aligned with `_VOLUME_RATIO_MIN` in signal_generator)
+- Volume threshold in `is_tradable_regime`: `current_vol >= vol_sma × 0.70` (aligned with `_VOLUME_RATIO_MIN` in signal_generator; signal_generator uses last completed candle `iloc[-2]`)
 
 ## Key Design Decisions
 
@@ -112,9 +113,9 @@ Class-based `RiskManager` configured via `RiskConfig` dataclass. One instance li
   - Cleared at midnight UTC by `_check_daily_reset()` and by `/api/bot/reset`
 
 ### Signal Filters (applied in order in `get_signal`)
-1. **HTF trend** — must be UP or DOWN (NEUTRAL → `weak_trend` skip)
-2. **Volume gate** — current vol must be ≥ 70% of 20-bar SMA (`low_vol` skip)
-3. **Dead market floor** — `ATR(14)/price < 0.0025` → `dead_market` skip — hard floor that overrides PULLBACK exemption; at this ATR level 1R barely covers round-trip costs
+1. **HTF trend** — price vs trend SMA only (price > SMA → UP, price < SMA → DOWN, else NEUTRAL). Fast SMA is NOT required to clear trend SMA — that added ~80 h lag on 4h and caused prolonged NEUTRAL during sharp moves
+2. **Volume gate** — last *completed* candle vol must be ≥ 70% of 20-bar SMA (`low_vol` skip). Uses `iloc[-2]` not `iloc[-1]` because the live candle is still forming and always reads low
+3. **Dead market floor** — `ATR(14)/price < preset.volatility_floor` → `dead_market` skip. Floor is per-preset (`2 × fee_rate / atr_sl_multiplier`): scalping=0.0013, day=0.0010, swing=0.0007. Overrides PULLBACK exemption
 4. **ATR regime** (`_is_market_trending`) — CROSSOVER/MOMENTUM/BREAKOUT suppressed when ATR < 70% of 30-bar mean (`chop` skip); PULLBACK still runs but is blocked by the dead_market check above
 5. **ADX gate on PULLBACK** — requires ADX ≥ 20 (`weak_trend` skip)
 6. **RM regime gate** (`rm.is_tradable_regime`) — called in `_seek_entry` before `get_signal`; also logs `weak_trend`/`low_vol`/`chop`
