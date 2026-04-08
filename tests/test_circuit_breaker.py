@@ -197,6 +197,32 @@ def test_cb_pause_not_extended_on_subsequent_ticks() -> None:
 
 
 # ─────────────────────────────────────────────────────────────
+# Test: CB watermark prevents re-trip on same losses
+# ─────────────────────────────────────────────────────────────
+
+def test_cb_watermark_prevents_retrip() -> None:
+    """After CB trips, it must NOT re-trip at the same loss level.
+
+    This prevents the 4h-pause → re-trip → 4h-pause infinite loop that
+    locked the bot out for the rest of the day.
+    """
+    print("\n[CB: watermark prevents re-trip on same losses]")
+    rm = make_rm(equity=1000.0, max_daily_loss_pct=0.02)
+    rm.record_trade_close(-25.0)  # 2.5% — will trip
+    check("CB trips on first check", rm.check_daily_circuit_breaker())
+    # Same loss level — should NOT re-trip (watermark set to -25)
+    check("CB does NOT re-trip at same loss", not rm.check_daily_circuit_breaker())
+    # New loss deepens past watermark — should re-trip
+    rm.record_trade_close(-5.0)  # daily_pnl now -30
+    check("CB re-trips after deeper loss", rm.check_daily_circuit_breaker())
+    # Same deeper level — should NOT re-trip again
+    check("CB does NOT re-trip at same deeper loss", not rm.check_daily_circuit_breaker())
+    # Daily reset clears watermark
+    rm.reset_daily_stats()
+    check("Watermark cleared after reset", rm._cb_pnl_watermark is None)
+
+
+# ─────────────────────────────────────────────────────────────
 # Runner
 # ─────────────────────────────────────────────────────────────
 
@@ -208,6 +234,7 @@ if __name__ == "__main__":
     test_cb_uses_current_equity()
     test_botrunner_daily_reset_pause_behaviour()
     test_cb_pause_not_extended_on_subsequent_ticks()
+    test_cb_watermark_prevents_retrip()
 
     print()
     if _failures:

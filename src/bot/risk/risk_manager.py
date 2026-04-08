@@ -112,6 +112,8 @@ class RiskManager:
         self.daily_pnl: float = 0.0
         self.daily_trades: int = 0
         self._daily_reset_date: Optional[str] = None
+        # PnL watermark at last CB trip — prevents re-trip on same losses
+        self._cb_pnl_watermark: Optional[float] = None
         logger.info(
             "RiskManager initialised | equity=%.2f | max_daily_loss=%.1f%% | risk_per_trade=%.2f%%",
             initial_equity, config.max_daily_loss_pct * 100, config.risk_per_trade_pct * 100,
@@ -400,12 +402,23 @@ class RiskManager:
 
         Circuit-breaker is computed against *current* equity so it scales correctly
         as the account grows (unlike a fixed initial-equity reference).
+
+        Uses a PnL watermark to prevent re-tripping on the same accumulated loss
+        after a pause expires.  Only re-trips if losses deepen past the previous
+        watermark (i.e. a new trade lost money after the pause).
         """
         if self.daily_pnl >= 0:
+            return False
+        # Skip if losses haven't deepened past the last trip level
+        if (
+            self._cb_pnl_watermark is not None
+            and self.daily_pnl >= self._cb_pnl_watermark
+        ):
             return False
         loss_pct = abs(self.daily_pnl) / self.equity if self.equity > 0 else 0.0
         tripped = loss_pct >= self.cfg.max_daily_loss_pct
         if tripped:
+            self._cb_pnl_watermark = self.daily_pnl
             logger.critical(
                 "Daily circuit breaker tripped — daily_pnl=%.4f equity=%.2f (%.1f%%)",
                 self.daily_pnl, self.equity, loss_pct * 100,
@@ -425,3 +438,4 @@ class RiskManager:
         )
         self.daily_pnl = 0.0
         self.daily_trades = 0
+        self._cb_pnl_watermark = None

@@ -213,14 +213,19 @@ class BotRunner:
         now = datetime.now(timezone.utc)
         with state._lock:
             active_pause = state._signal_pause_until
-        if active_pause and now < active_pause:
+            if active_pause and now >= active_pause:
+                # Pause served — clear it and resume trading
+                state._signal_pause_until = None
+                active_pause = None
+                logger.info("Circuit breaker pause expired — resuming signal generation")
+        if active_pause:
             logger.debug(
                 "Signal generation paused by circuit breaker until %s UTC",
                 active_pause.strftime("%H:%M"),
             )
             return
 
-        # Only evaluate CB when no active pause — prevents timer-reset loop
+        # CB re-trips only if losses deepen past the previous watermark
         if state.risk_manager.check_daily_circuit_breaker():
             pause_until = now + timedelta(hours=4)
             with state._lock:
