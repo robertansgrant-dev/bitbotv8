@@ -12,8 +12,8 @@ from src.bot.analysis.session_analyzer import (
     get_current_session,
     get_session_recommendation,
 )
+from src.bot.strategy.indicators import ema as calc_ema
 from src.bot.strategy.indicators import macd as calc_macd
-from src.bot.strategy.indicators import sma as calc_sma
 
 logger = logging.getLogger(__name__)
 market_bp = Blueprint("market", __name__)
@@ -56,9 +56,9 @@ def get_chart(timeframe: str):
     df = pd.DataFrame(klines)
     close = df["close"]
     preset = s.preset
-    df["sma_fast"] = calc_sma(close, preset.sma_fast)
-    df["sma_slow"] = calc_sma(close, preset.sma_slow)
-    df["sma_trend"] = calc_sma(close, preset.sma_trend)
+    df["sma_fast"] = calc_ema(close, preset.sma_fast)
+    df["sma_slow"] = calc_ema(close, preset.sma_slow)
+    df["sma_trend"] = calc_ema(close, preset.sma_trend)
     macd_df = calc_macd(close)
     # Trim to last 200 candles after all indicators are computed with full history
     df = df.tail(200).reset_index(drop=True)

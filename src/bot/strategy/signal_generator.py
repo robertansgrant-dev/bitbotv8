@@ -5,7 +5,7 @@ from typing import Literal
 
 import pandas as pd
 
-from src.bot.strategy.indicators import adx, atr, rsi, sma
+from src.bot.strategy.indicators import adx, atr, ema, macd, rsi, sma
 from src.config.presets import StylePreset
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,8 @@ Trend = Literal["UP", "DOWN", "NEUTRAL"]
 
 # Minimum ADX value required to take a PULLBACK signal.
 # Below this threshold the market is ranging and pullback entries underperform.
-_ADX_TREND_THRESHOLD = 25.0
+# 20 is the standard threshold — 25 was too strict and filtered valid setups.
+_ADX_TREND_THRESHOLD = 20.0
 
 # Volume must be at least this fraction of its rolling average for any signal.
 # Protects against entries in illiquid/thin conditions.
@@ -24,16 +25,15 @@ _VOLUME_RATIO_MIN = 0.70
 
 
 def get_htf_trend(df_htf: pd.DataFrame, preset: StylePreset) -> Trend:
-    """Determine higher-timeframe trend direction using price vs trend SMA.
+    """Determine higher-timeframe trend direction using price vs trend EMA.
 
-    Only price vs the trend SMA is used — requiring the fast SMA to also clear
-    the trend SMA adds ~80 h of extra lag on the 4h timeframe, keeping the bot in
-    NEUTRAL for the entire duration of a sharp rally or sell-off.
+    Only price vs the trend EMA is used — requiring the fast EMA to also clear
+    the trend EMA adds excessive lag, keeping the bot in NEUTRAL during sharp moves.
     """
     if len(df_htf) < preset.sma_trend:
         return "NEUTRAL"
     close = df_htf["close"]
-    trend_val = sma(close, preset.sma_trend).iloc[-1]
+    trend_val = ema(close, preset.sma_trend).iloc[-1]
     price = close.iloc[-1]
     if price > trend_val:
         return "UP"
@@ -62,13 +62,10 @@ def _is_market_trending(df: pd.DataFrame) -> bool:
 def _is_market_dead(df: pd.DataFrame, volatility_floor: float) -> bool:
     """Return True when ATR/price is below the per-preset volatility floor.
 
-    Floor is derived per preset as 2 * fee_rate / atr_sl_multiplier so that
-    1R always covers round-trip costs regardless of timeframe:
-      scalping  (1m, mult=1.5) → 0.0013
-      day_trade (1h, mult=2.0) → 0.0010
-      swing     (1d, mult=3.0) → 0.0007
-    A single hardcoded 0.0025 floor permanently blocked scalping on 1m bars
-    where BTC's natural ATR/price is ~0.0008.
+    Floor is derived per preset so that 1R covers round-trip costs:
+      scalping  (1m, mult=1.0) → 0.0005
+      day_trade (15m, mult=1.5) → 0.0010
+      swing     (1h, mult=2.0) → 0.0007
     """
     if len(df) < 15:
         return False  # insufficient history — allow through
@@ -98,22 +95,33 @@ def _has_sufficient_volume(df: pd.DataFrame, periods: int = 20) -> bool:
 
 
 def _crossover(df: pd.DataFrame, preset: StylePreset, trend: Trend) -> Direction:
-    """SMA fast/slow crossover in the trend direction with minimum gap filter.
+    """EMA fast/slow crossover with MACD histogram confirmation.
 
     Requires the gap between fast and slow to be at least 0.05% of price after
-    the cross — filters micro-crosses in flat/ranging markets.
+    the cross, AND the MACD histogram must agree with the direction — filters
+    false crosses in flat/ranging markets.
     """
     if len(df) < preset.sma_slow + 2:
         return "NONE"
-    fast = sma(df["close"], preset.sma_fast)
-    slow = sma(df["close"], preset.sma_slow)
+    close = df["close"]
+    fast = ema(close, preset.sma_fast)
+    slow = ema(close, preset.sma_slow)
     crossed_up = fast.iloc[-2] <= slow.iloc[-2] and fast.iloc[-1] > slow.iloc[-1]
     crossed_dn = fast.iloc[-2] >= slow.iloc[-2] and fast.iloc[-1] < slow.iloc[-1]
     min_gap = slow.iloc[-1] * 0.0005  # 0.05% of price — filters noise crosses
+
+    # MACD histogram must confirm crossover direction
+    macd_df = macd(close)
+    hist = macd_df["histogram"].iloc[-1]
+    if pd.isna(hist):
+        return "NONE"
+
     if crossed_up and trend == "UP" and fast.iloc[-1] - slow.iloc[-1] >= min_gap:
-        return "LONG"
+        if hist > 0:
+            return "LONG"
     if crossed_dn and trend == "DOWN" and slow.iloc[-1] - fast.iloc[-1] >= min_gap:
-        return "SHORT"
+        if hist < 0:
+            return "SHORT"
     return "NONE"
 
 
@@ -123,7 +131,7 @@ def _pullback(
     trend: Trend,
     adx_val: float,
 ) -> Direction:
-    """Price pulls back to fast SMA and bounces with RSI and ADX confirmation.
+    """Price pulls back to fast EMA and bounces with RSI and ADX confirmation.
 
     ADX filter: requires adx_val >= _ADX_TREND_THRESHOLD (default 20) to avoid
     taking pullback entries in choppy/ranging regimes where the HTF trend may be
@@ -134,13 +142,13 @@ def _pullback(
     if len(df) < preset.sma_slow + 2:
         return "NONE"
     close = df["close"]
-    fast = sma(close, preset.sma_fast)
-    slow = sma(close, preset.sma_slow)
+    fast = ema(close, preset.sma_fast)
+    slow = ema(close, preset.sma_slow)
     price = close.iloc[-1]
     prev = close.iloc[-2]
     fast_val = fast.iloc[-1]
     slow_val = slow.iloc[-1]
-    tol = fast_val * 0.003  # 0.3% tolerance band around fast SMA
+    tol = fast_val * 0.003  # 0.3% tolerance band around fast EMA
     rsi_val = rsi(close).iloc[-1]
 
     if trend == "UP" and fast_val > slow_val:
@@ -153,18 +161,18 @@ def _pullback(
 
 
 def _momentum(df: pd.DataFrame, preset: StylePreset, trend: Trend) -> Direction:
-    """Fast SMA rising, price above both MAs, RSI 50-75."""
+    """Fast EMA rising, price above both MAs, RSI 50-75."""
     if len(df) < preset.sma_slow + 15:
         return "NONE"
     close = df["close"]
-    fast = sma(close, preset.sma_fast)
-    slow = sma(close, preset.sma_slow)
+    fast = ema(close, preset.sma_fast)
+    slow = ema(close, preset.sma_slow)
     rsi_val = rsi(close).iloc[-1]
     price = close.iloc[-1]
     fast_val = fast.iloc[-1]
     slow_val = slow.iloc[-1]
 
-    min_dist = fast_val * 0.0015  # price must be 0.15% beyond fast SMA — avoids entries near SMA
+    min_dist = fast_val * 0.0015  # price must be 0.15% beyond fast EMA
     if trend == "UP":
         fast_rising = fast.iloc[-1] > fast.iloc[-3]
         if fast_rising and price > fast_val + min_dist and fast_val > slow_val and 50 <= rsi_val <= 75:

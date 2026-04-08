@@ -62,18 +62,21 @@ Mode switching is **in-memory only** — never written to disk.
 | | Scalping | Day Trading | Swing Trading |
 |---|---|---|---|
 | LTF (entry) | 1m | 15m | 1h |
-| HTF (trend) | 5m | 4h | 1d |
+| HTF (trend) | 5m | 1h | 1d |
 | Position size (fallback) | 20% | 60% | 90% |
 | Stop loss (fallback %) | 0.4% | 1.5% | 3.5% |
-| R:R | 2.0 | 2.5 | 4.0 |
-| Max trades/day | 100 | 5 | 3 |
-| SMA fast/slow/trend | 8/20/200 | 9/21/200 | 30/100/200 |
-| Max hold (minutes) | 30 | 360 | 1440 |
-| risk_per_trade_pct | 0.5% | 1.0% | 1.5% |
-| atr_sl_multiplier | 1.5× | 2.0× | 3.0× |
-| volatility_floor | 0.0005 | 0.0015 | 0.0007 |
+| R:R | 1.5 | 2.0 | 3.0 |
+| Max trades/day | 100 | 8 | 3 |
+| EMA fast/slow/trend | 8/21/200 | 9/21/50 | 21/55/200 |
+| Max hold (minutes) | 30 | 480 | 1440 |
+| risk_per_trade_pct | 1.0% | 1.0% | 1.5% |
+| atr_sl_multiplier | 1.0× | 1.5× | 2.0× |
+| volatility_floor | 0.0005 | 0.0010 | 0.0007 |
 
 Position sizing and SL/TP are **ATR-based** when klines are available. Fixed-% values above are fallbacks only.
+
+All signal indicators use **EMA** (not SMA) for faster response. CROSSOVER signals require MACD histogram confirmation.
+Graduated exits: 50% of position closed at 1.5R profit, remainder trails with tighter stop (ATR × 1.0 after partial TP).
 
 ## Risk Manager (`src/bot/risk/risk_manager.py`)
 Class-based `RiskManager` configured via `RiskConfig` dataclass. One instance lives on `BotState`.
@@ -84,7 +87,7 @@ Class-based `RiskManager` configured via `RiskConfig` dataclass. One instance li
 - `time_exit_minutes` — synced from `preset.max_hold_minutes`
 - `max_hold_extension_minutes` — 5 min for scalping, 15 min for other styles
 - `fee_rate` — synced from `settings.fee_rate` (default 0.001 = 0.1% Binance spot)
-- `min_volatility_pct` — per-preset `volatility_floor` (scalping=0.0013, day=0.0010, swing=0.0007)
+- `min_volatility_pct` — per-preset `volatility_floor` (scalping=0.0005, day=0.0010, swing=0.0007)
 
 **Methods used by bot_runner:**
 - `calculate_dynamic_levels(df, entry, side)` → `(sl, tp, atr_val)` — ATR-based, falls back to 1.5% fixed if ATR fails
@@ -116,20 +119,21 @@ Class-based `RiskManager` configured via `RiskConfig` dataclass. One instance li
   - Cleared at midnight UTC by `_check_daily_reset()` and by `/api/bot/reset`
 
 ### Signal Filters (applied in order in `get_signal`)
-1. **HTF trend** — price vs trend SMA only (price > SMA → UP, price < SMA → DOWN, else NEUTRAL). Fast SMA is NOT required to clear trend SMA — that added ~80 h lag on 4h and caused prolonged NEUTRAL during sharp moves
+1. **HTF trend** — price vs trend EMA only (price > EMA → UP, price < EMA → DOWN, else NEUTRAL). Fast EMA is NOT required to clear trend EMA
 2. **Volume gate** — last *completed* candle vol must be ≥ 70% of 20-bar SMA (`low_vol` skip). Uses `iloc[-2]` not `iloc[-1]` because the live candle is still forming and always reads low
 3. **Dead market floor** — `ATR(14)/price < preset.volatility_floor` → `dead_market` skip. Floor is per-preset (`2 × fee_rate / atr_sl_multiplier`): scalping=0.0013, day=0.0010, swing=0.0007. Overrides PULLBACK exemption
 4. **ATR regime** (`_is_market_trending`) — CROSSOVER/MOMENTUM/BREAKOUT suppressed when ATR < 70% of 30-bar mean (`chop` skip); PULLBACK still runs but is blocked by the dead_market check above
-5. **ADX gate on PULLBACK** — requires ADX ≥ 25 (`weak_trend` skip)
-6. **RM regime gate** (`rm.is_tradable_regime`) — called in `_seek_entry` before `get_signal`; also logs `weak_trend`/`low_vol`/`chop`
+5. **ADX gate on PULLBACK** — requires ADX ≥ 20 (`weak_trend` skip)
+6. **MACD histogram** — CROSSOVER requires histogram to agree with direction (filters false crosses)
 
 ### Exit Logic
 - SL/TP checked first (hard limits via `_check_sl_tp` in `bot_runner.py`)
+- **Graduated exit**: at 1.5R profit, 50% of position is closed (partial TP). Remaining half trails with tighter stop (ATR × 1.0 after partial TP vs full multiplier before)
 - Time exit via `rm.should_exit_by_time`:
   - Hard cap at `max_hold_minutes`
   - **`extend_for_fees`**: past base hold but profit < 1.5× round-trip cost → extends up to `max_hold_extension_minutes` AND tightens `pos.stop_loss` to `entry + fee_per_unit` (atomic, inside lock). This bounds the extension-window loss to fee cost only
 - Break-even: once +0.5R profit, `pos.stop_loss` snapped to `entry + fee_per_unit` (covers round-trip)
-- Trailing stop: after break-even, ratchets at `ATR × atr_sl_multiplier` distance from price (styles with `trailing_stop=True`)
+- Trailing stop: after break-even, ratchets at `ATR × atr_sl_multiplier` distance from price (ATR × 1.0 after partial TP). Styles with `trailing_stop=True`
 
 ### Fee & PnL Accounting
 - Fees: `(entry_notional + exit_notional) × fee_rate` — both legs charged

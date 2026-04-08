@@ -24,6 +24,8 @@ class Position:
     atr_at_entry: float = 0.0
     # True once price has moved +0.5R in our favour and stop was moved to break-even
     break_even_activated: bool = False
+    # True once 50% of the position has been closed at partial TP (1.5R profit)
+    partial_tp_taken: bool = False
     # MFE (Maximum Favourable Excursion) watermarks — updated each tick in bot_runner
     max_price_seen: Optional[float] = None   # highest price seen while LONG
     min_price_seen: Optional[float] = None   # lowest price seen while SHORT

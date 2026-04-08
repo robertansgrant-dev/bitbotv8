@@ -277,6 +277,9 @@ class BotRunner:
             self._close_position(client, price, hard_reason)
             return
 
+        # Graduated exit: take 50% off at 1.5R profit, let the rest trail
+        self._check_partial_tp(client, pos, price)
+
         ts = _pos_to_trade_state(pos)
         should_exit, time_reason = state.risk_manager.should_exit_by_time(
             ts, price, datetime.now(timezone.utc)
@@ -312,12 +315,16 @@ class BotRunner:
                 self._update_trailing_stop(pos, price, preset)
 
     def _update_trailing_stop(self, pos: Position, price: float, preset: StylePreset) -> None:
-        """Ratchet the trailing stop in the profit direction (called inside lock)."""
-        atr_dist = (
-            pos.atr_at_entry * preset.atr_sl_multiplier
-            if pos.atr_at_entry > 0
-            else pos.entry_price * (preset.stop_loss_pct / 100)
-        )
+        """Ratchet the trailing stop in the profit direction (called inside lock).
+
+        After partial TP, trail tighter (ATR × 1.0) to protect remaining profits.
+        """
+        if pos.atr_at_entry > 0:
+            # Tighter trail after partial TP has locked in profit
+            mult = 1.0 if pos.partial_tp_taken else preset.atr_sl_multiplier
+            atr_dist = pos.atr_at_entry * mult
+        else:
+            atr_dist = pos.entry_price * (preset.stop_loss_pct / 100)
         current_trail = pos.trailing_stop or pos.stop_loss
         if pos.side == "LONG":
             pos.trailing_stop = max(current_trail, price - atr_dist)
@@ -350,6 +357,72 @@ class BotRunner:
             be_sl, elapsed,
         )
 
+    def _check_partial_tp(
+        self, client: BinanceClient, pos: Position, price: float
+    ) -> None:
+        """Close 50% of the position at 1.5R profit (graduated exit).
+
+        After the partial close, the remaining half rides with the trailing stop.
+        This locks in profit early while keeping upside exposure.
+        """
+        state = self._state
+        if pos.partial_tp_taken:
+            return
+
+        risk_distance = abs(pos.entry_price - pos.stop_loss)
+        if risk_distance == 0:
+            return
+        partial_r = 1.5
+        if pos.side == "LONG":
+            profit = price - pos.entry_price
+        else:
+            profit = pos.entry_price - price
+
+        if profit < risk_distance * partial_r:
+            return
+
+        half_qty = round(pos.quantity / 2, 6)
+        if half_qty <= 0:
+            return
+
+        binance_side = "SELL" if pos.side == "LONG" else "BUY"
+        try:
+            client.place_order(state.settings.symbol, binance_side, half_qty)
+        except Exception as exc:
+            logger.error("Partial TP order failed: %s", exc)
+            return
+
+        # Calculate partial PnL
+        if pos.side == "LONG":
+            partial_pnl = (price - pos.entry_price) * half_qty
+        else:
+            partial_pnl = (pos.entry_price - price) * half_qty
+        notional = pos.entry_price * half_qty
+        fees = notional * (state.risk_manager.cfg.fee_rate * 2
+                           + state.risk_manager.cfg.slippage_rate)
+        net_partial = partial_pnl - fees
+
+        with state._lock:
+            pos.quantity = round(pos.quantity - half_qty, 6)
+            pos.partial_tp_taken = True
+            state.portfolio.current_capital += net_partial
+            state.portfolio.daily_pnl += net_partial
+            state.portfolio.total_fees += fees
+
+        state.risk_manager.record_trade_close(net_partial)
+
+        logger.info(
+            "Partial TP: closed %.6f @ %.2f  net=%.4f  remaining=%.6f",
+            half_qty, price, net_partial, pos.quantity,
+        )
+        state.log_activity(
+            "POSITION_CLOSED",
+            f"Partial TP {pos.side}: closed {half_qty:.6f} @ {price:.2f}"
+            f"  net={net_partial:+.4f}  remaining={pos.quantity:.6f}",
+            {"side": pos.side, "partial_qty": half_qty, "price": price,
+             "net": net_partial, "remaining_qty": pos.quantity},
+        )
+
     # ------------------------------------------------------------------ #
     # Entry                                                                #
     # ------------------------------------------------------------------ #
@@ -378,10 +451,8 @@ class BotRunner:
 
         sync_rm_from_preset(state.risk_manager, preset, state.settings)
 
-        if not state.risk_manager.is_tradable_regime(df):
-            logger.debug("RiskManager: market not tradable — skipping entry")
-            return
-
+        # Regime filtering is handled inside get_signal (volume, dead_market,
+        # ATR regime, ADX) — no duplicate RM regime check here.
         signal_type, direction = get_signal(df, df_htf, preset)
         if direction == "NONE":
             return
